@@ -1,7 +1,12 @@
+braceexpand
 future
+msgpack
 numpy
+objectio
+Pillow
 pyyaml
 requests
 setuptools
+simplejson
 six
 typing_extensions
