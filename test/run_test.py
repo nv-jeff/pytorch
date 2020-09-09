@@ -87,6 +87,10 @@ TESTS = [
     'test_futures',
     'test_fx',
     'test_functional_autograd_benchmark'
+    'test_webdataset_dataset',
+    'test_webdataset_gopen',
+    'test_webdataset_multi',
+    'test_webdataset_writer'
 ]
 
 WINDOWS_BLOCKLIST = [
