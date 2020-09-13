@@ -10,6 +10,7 @@ from torch.utils.data.webdataset import dataset as wds
 from torch.utils.data.webdataset import autodecode, tenbin
 
 local_data = "webdataset_testdata/imagenet-000000.tgz"
+compressed = "webdataset_testdata/compressed.tar"
 remote_loc = "http://storage.googleapis.com/nvdata-openimages/"
 remote_shards = "openimages-train-0000{00..99}.tar"
 remote_shard = "openimages-train-000321.tar"
@@ -63,6 +64,14 @@ def test_dataset_pipe_cat():
     assert count_samples_tuple(ds) == 47
 
 
+def test_dataset_eof():
+    import tarfile
+
+    with pytest.raises(tarfile.ReadError):
+        ds = wds.Dataset(f"pipe:dd if={local_data} bs=1024 count=10").shuffle(5)
+        assert count_samples(ds) == 47
+
+
 def test_dataset_eof_handler():
     ds = wds.Dataset(
         f"pipe:dd if={local_data} bs=1024 count=10", handler=wds.ignore_and_stop
@@ -70,25 +79,95 @@ def test_dataset_eof_handler():
     assert count_samples(ds) < 47
 
 
+def test_dataset_decode_nohandler():
+    count = [0]
+
+    def faulty_decoder(key, data):
+        if count[0] % 2 == 0:
+            raise ValueError("nothing")
+        else:
+            return data
+        count[0] += 1
+
+    with pytest.raises(ValueError):
+        ds = wds.Dataset(local_data).decode(faulty_decoder)
+        count_samples_tuple(ds)
+
+
+def test_dataset_missing_totuple_raises():
+    with pytest.raises(ValueError):
+        ds = wds.Dataset(local_data).to_tuple("foo", "bar")
+        count_samples_tuple(ds)
+
+
+def test_dataset_missing_rename_raises():
+    with pytest.raises(ValueError):
+        ds = wds.Dataset(local_data).rename(x="foo", y="bar")
+        count_samples_tuple(ds)
+
+
 def test_dataset_decode_handler():
     count = [0]
     good = [0]
 
-    decoder = autodecode.make_decoder("rgb")
-
-    def faulty_decoder(sample):
+    def faulty_decoder(key, data):
+        if "png" not in key:
+            return data
         count[0] += 1
         if count[0] % 2 == 0:
             raise ValueError("nothing")
         else:
             good[0] += 1
-            return decoder(sample)
+            return data
 
-    ds = wds.Dataset(local_data).decode(faulty_decoder, wds.ignore_and_continue)
+    ds = wds.Dataset(local_data).decode(faulty_decoder, handler=wds.ignore_and_continue)
     result = count_samples_tuple(ds)
     assert count[0] == 47
     assert good[0] == 24
     assert result == 24
+
+
+def test_dataset_rename_handler():
+
+    ds = wds.Dataset(local_data).rename(image="png;jpg", cls="cls")
+    count_samples_tuple(ds)
+
+    with pytest.raises(ValueError):
+        ds = wds.Dataset(local_data).rename(image="missing", cls="cls")
+        count_samples_tuple(ds)
+
+
+def test_dataset_map_handler():
+    def f(x):
+        assert isinstance(x, dict)
+        return x
+
+    def g(x):
+        raise ValueError()
+
+    ds = wds.Dataset(local_data).map(f)
+    count_samples_tuple(ds)
+
+    with pytest.raises(ValueError):
+        ds = wds.Dataset(local_data).map(g)
+        count_samples_tuple(ds)
+
+
+def test_dataset_map_dict_handler():
+
+    ds = wds.Dataset(local_data).map_dict(png=identity, cls=identity)
+    count_samples_tuple(ds)
+
+    with pytest.raises(KeyError):
+        ds = wds.Dataset(local_data).map_dict(png=identity, cls2=identity)
+        count_samples_tuple(ds)
+
+    def g(x):
+        raise ValueError()
+
+    with pytest.raises(ValueError):
+        ds = wds.Dataset(local_data).map_dict(png=g, cls=identity)
+        count_samples_tuple(ds)
 
 
 def test_dataset_shuffle_decode_rename_extract():
@@ -102,7 +181,7 @@ def test_dataset_shuffle_decode_rename_extract():
     assert count_samples_tuple(ds) == 47
     image, cls = next(iter(ds))
     assert isinstance(image, np.ndarray), image
-    assert isinstance(cls, int)
+    assert isinstance(cls, int), type(cls)
 
 
 def test_dataset_len():
@@ -132,6 +211,13 @@ def test_raw():
     image, cls = next(iter(ds))
     assert isinstance(image, bytes)
     assert isinstance(cls, bytes)
+
+
+def test_gz():
+    ds = wds.Dataset(compressed).decode()
+    sample = next(iter(ds))
+    print(sample)
+    assert sample["txt.gz"] == "hello\n", sample
 
 
 def test_rgb8_np_vs_torch():
@@ -192,16 +278,13 @@ def test_dataloader():
 
 
 def test_handlers():
-    handlers = dict(autodecode.default_handlers["rgb"])
 
-    def decode_jpg_and_resize(data):
+    def mydecoder(data):
         return PIL.Image.open(io.BytesIO(data)).resize((128, 128))
-
-    handlers["jpg"] = decode_jpg_and_resize
 
     ds = (
         wds.Dataset(remote_loc + remote_shard)
-        .decode(handlers)
+        .decode(("jpg", mydecoder))
         .to_tuple("jpg;png", "json")
     )
 
@@ -211,8 +294,8 @@ def test_handlers():
 
 
 def test_decoder():
-    def mydecoder(sample):
-        return {k: len(v) for k, v in sample.items()}
+    def mydecoder(key, sample):
+        return len(sample)
 
     ds = (
         wds.Dataset(remote_loc + remote_shard)
