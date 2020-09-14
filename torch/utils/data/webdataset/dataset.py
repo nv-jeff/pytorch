@@ -26,7 +26,7 @@ from builtins import range
 import braceexpand
 from torch.utils.data import IterableDataset
 
-from . import filters, gopen
+from . import filters, gopen, autodecode
 
 # from functools import wraps
 trace = False
@@ -100,6 +100,7 @@ def do_nothing(*args, **kw):
 
 class Shuffler:
     """Make a shuffle function (avoid nesting for pickle)."""
+
     def __init__(self, rng):
         self.rng = rng
 
@@ -268,9 +269,31 @@ class Pipeline:
         seed = random.SystemRandom().random()
         self.rng.seed(seed)
 
-    def decode(self, decoder="rgb", handler=reraise_exception):
+    def decode(
+        self,
+        *args,
+        handler=reraise_exception,
+        pre=[autodecode.gzfilter],
+        post=[autodecode.basichandlers],
+    ):
         """Decode the data with the given decoder."""
-        self.pipeline.append(filters.decode(decoder, handler=handler))
+        handlers = pre + list(args) + post
+        # special case for images (backwards compatibility)
+        for i in range(len(handlers)):
+            if isinstance(handlers[i], tuple) and isinstance(handlers[i][0], str):
+                assert callable(handlers[i][1]), handlers[i][1]
+                handlers[i] = autodecode.handle_extension(
+                    handlers[i][0], handlers[i][1]
+                )
+            elif isinstance(handlers[i], str):
+                handlers[i] = autodecode.ImageHandler(handlers[i])
+        for f in handlers:
+            assert callable(f), f"unknown handler {f} in `Dataset.decode`"
+        # always provide basichandlers; if you don't want it,
+        # either map Decoder yourself, or override the types
+        # you don't want decoded
+        decoder = autodecode.Decoder(handlers)
+        self.pipeline.append(filters.map(decoder, handler=handler))
         return self
 
     def map(self, f, handler=reraise_exception):
