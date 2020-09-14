@@ -10,8 +10,6 @@
 or over HTTP connections.
 """
 
-__all__ = "WebDataset tariterator default_handlers imagehandler".split()
-
 import pickle
 import re
 import os

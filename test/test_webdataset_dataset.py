@@ -566,13 +566,11 @@ class WebdatasetDatasetTests(TestCase):
     def test_dataset_decode_nohandler(self):
         count = [0]
 
-        decoder = autodecode.make_decoder("rgb")
-
-        def faulty_decoder(sample):
+        def faulty_decoder(key, data):
             if count[0] % 2 == 0:
                 raise ValueError("nothing")
             else:
-                return decoder(sample)
+                return data
             count[0] += 1
 
         with self.assertRaises(ValueError):

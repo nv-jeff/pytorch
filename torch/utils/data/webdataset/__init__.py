@@ -22,6 +22,6 @@ from .dataset import (
     worker_urls,
     all_urls
 )
-from .autodecode import default_handlers
 from .writer import ShardWriter, TarWriter
 from .multi import MultiDataset
+from .autodecode import imagehandler, torch_video, torch_audio, Decoder, gzfilter
